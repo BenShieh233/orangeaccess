@@ -175,7 +175,7 @@ def plot_bar_chart(total_summary_df, selected_param):
         total_summary_df,
         x="Campaign Label",  # 用缩短的名称
         y=selected_param,
-        text=total_summary_df[selected_param].apply(lambda x: f"${x:,.0f}"),
+        text=total_summary_df[selected_param].apply(lambda x: f"{x:,.0f}"),
         color=selected_param,
         color_continuous_scale="Blues"
     )
