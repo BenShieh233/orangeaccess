@@ -7,6 +7,7 @@ platform_config = {
         "functions": {
             "数据预览": process_homedepot_preview,
             "趋势分析": plot_homedepot_linechart,
+            "产品-数据实时关系": product_ad_relationship
         }
     },
     # "Wayfair": {
