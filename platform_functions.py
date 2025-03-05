@@ -3,12 +3,15 @@ import plotly.express as px
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.colors
-from options_config import*
+from options_config import *
+import time
+import json
+import requests
 
 # HomeDepot 平台独有的处理函数
 def process_homedepot_preview(df):
     st.subheader("HomeDepot 数据预览")
-    st.write(df.head())
+    st.write(df)
 
 def process_data(df: pd.DataFrame, 
                  column_to_aggregate: str, 
@@ -76,8 +79,6 @@ def plot_homedepot_linechart(df):
         ad_type_options = df['Ad Type'].unique().tolist()
         selected_ad_type = st.multiselect("选择广告类型:", ad_type_options, default=ad_type_options)
 
-
-
     df = df[
         (df['Status'].isin(selected_status)) &
         (df['Platform'].isin(selected_platform)) &
@@ -96,13 +97,20 @@ def plot_homedepot_linechart(df):
     )
 
     max_campaigns = len(df['Campaign ID'].unique())
-    min_rank, max_rank = st.slider(
-        "选择Campaign IDs的排名范围:",
-        min_value=1,
-        max_value=max_campaigns,
-        value=(1, min(5, max_campaigns)),
-        step=1
-    )
+
+    if max_campaigns > 1:
+        min_rank, max_rank = st.slider(
+            "选择Campaign IDs的排名范围:",
+            min_value=1,
+            max_value=max_campaigns,
+            value=(1, min(5, max_campaigns)),
+            step=1
+        )
+    else:
+        min_rank, max_rank = 1, 1  # 只有一个广告时，固定排名范围
+        st.info("仅有一条广告，无需选择排名范围。")
+
+
     df['Campaign ID'] = df['Campaign ID'].astype(str)
     aggregated_summary, total_summary = process_data(df,
                                                      aggregation_field,
@@ -170,12 +178,14 @@ def plot_bar_chart(total_summary_df, selected_param):
     total_summary_df["Short Name"] = total_summary_df["Campaign Name"].str.slice(0, 15) + "..."
     total_summary_df['Campaign ID'] = total_summary_df['Campaign ID'].astype(str)
     total_summary_df["Campaign Label"] = total_summary_df["Campaign ID"] + " - " + total_summary_df["Short Name"]
-
+    # 让数值自动判断格式（整数 or 小数）
+    def format_number(x):
+        return f"{x:,.0f}" if x == int(x) else f"{x:,.3f}"
     fig = px.bar(
         total_summary_df,
         x="Campaign Label",  # 用缩短的名称
         y=selected_param,
-        text=total_summary_df[selected_param].apply(lambda x: f"{x:,.0f}"),
+        text=total_summary_df[selected_param].apply(format_number),  # 自动判断格式
         color=selected_param,
         color_continuous_scale="Blues"
     )
@@ -232,7 +242,7 @@ def display_visual_summary(df: pd.DataFrame, selected_campaign_id: str, selected
         data, 
         x="Value", 
         y="Parameter", 
-        text=data["Rank"].apply(lambda r: f"🏆 Rank {r}"), 
+        text=data["Rank"].apply(lambda r: f"🏆 排名 {r}"), 
         orientation="h", 
         title=f"📊 {selected_campaign_id} 所有指标数据及其排名",
         color="Value",
@@ -301,7 +311,7 @@ def create_comparison_chart(df: pd.DataFrame, selected_campaign_id: str, selecte
 
     # 设置双轴
     fig_comparison.update_layout(
-        title=f"Dual-Axis Comparison for Campaign ID: {selected_campaign_id}",
+        title=f"Campaign ID为 {selected_campaign_id} 的共轴折线图",
         xaxis=dict(title='Interval'),
         yaxis=dict(title=f"{selected_params[0]} ({units[selected_params[0]]})", side='left'),
         yaxis2=dict(title=f"{selected_params[1]} ({units[selected_params[1]]})", overlaying='y', side='right'),
@@ -311,9 +321,75 @@ def create_comparison_chart(df: pd.DataFrame, selected_campaign_id: str, selecte
 
     return fig_comparison, total_values, ranks
 
+# 提取单个产品的函数
+def extract_product(product_dict: dict):
+    """提取产品的相关信息"""
+    if product_dict:
+        ad_id = product_dict.get('adId')
+        metrics = product_dict.get('metrics')
 
+        if metrics:
+            spend = metrics.get('adSpend')
+            ctr = metrics.get('ctr')
+            impressions = metrics.get('impressions')
+            roas = metrics.get('roas')
+            brandHaloRoas = metrics.get('brandHaloRoas')
 
+        sku = product_dict.get('sku')
+        product_name = product_dict.get('creative').get('name')
+        price = product_dict.get('creative').get('price')
 
+    data_dict = {
+        'ad_id': ad_id if ad_id else None,
+        'spend': spend if spend else None,
+        'ctr': ctr if ctr else None,
+        'impressions': impressions if impressions else None,
+        'roas': roas if roas else None,
+        'brandHaloRoas': brandHaloRoas if brandHaloRoas else None,
+        'sku': sku if sku else None,
+        'product_name': product_name if product_name else None,
+        'price': price if price else None
+    }
+
+    return data_dict
+
+def product_ad_relationship(df):
+    """爬取广告与产品之间的关系数据并展示"""
+    if 'if_fetching' not in st.session_state:
+        st.session_state['is_fetching'] = False
+    
+    start_button = st.button('开始爬取')
+    if start_button:
+        st.session_state['is_fetching'] = True
+
+        with st.spinner('正在爬取数据...'):
+            try:
+                df = df[df['Status'] == 'running']
+                campaign_ids = df['Campaign ID'].astype(str).unique()
+                responses = {}
+                product_results = []
+                base_url = "https://us.orangeapronmedia.com/api/v2/store/33602/campaigns/{}/targeting/?page=1&page_size=10"
+                base_referer = "https://us.orangeapronmedia.com/r/33602/campaign/details/{}"
+                for index, campaign_id in enumerate(campaign_ids):
+                    url = base_url.format(campaign_id)
+                    headers["Referer"] = base_referer.format(campaign_id)
+
+                    response = requests.get(url, headers=headers)
+                    responses[campaign_id] = response.json().get('results')
+                    for i in range(len(response.json().get('results'))):
+
+                        product_dict = extract_product(response.json().get('results')[i])
+
+                        product_dict['campaign_id'] = campaign_id
+
+                        product_results.append(product_dict)
+
+                    time.sleep(2)
+                st.write(pd.DataFrame(product_results))
+
+            except Exception as e:
+                st.write(e)
+                st.write(response.json().get('results'))
 # # # Wayfair 平台独有的处理函数
 # # def process_wayfair_preview(df):
 # #     st.subheader("Wayfair 数据预览")
