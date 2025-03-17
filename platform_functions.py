@@ -7,10 +7,15 @@ from options_config import *
 import time
 import json
 import requests
+import numpy as np
+
 
 # HomeDepot 平台独有的处理函数
 def process_homedepot_preview(df):
     st.subheader("HomeDepot 数据预览")
+    df['Interval'] = pd.to_datetime(df['Interval'].str.split(' to ').str[1], errors='coerce')
+    df['Interval'] = df['Interval'].dt.date
+
     st.write(df)
 
 def process_data(df: pd.DataFrame, 
@@ -54,13 +59,24 @@ def plot_homedepot_linechart(df):
     if "aggregation_field" not in st.session_state:
         st.session_state["aggregation_field"] = "Spend (sum)"
 
-    # if "date_range" not in st.session_state:
-    #     st.session_state["date_range"] = None
+    # 判断字符串是否为 'date to date' 格式
+    mask = df['Interval'].str.contains(r'\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}', na=False, regex=True)
 
+    # 条件转换：
+    # - 如果符合 'date to date' 格式，提取第二个日期
+    # - 否则直接转换整个字符串
+    df['Interval'] = np.where(
+        mask,
+        pd.to_datetime(df['Interval'].str.split(' to ').str[1], errors='coerce'),
+        pd.to_datetime(df['Interval'], errors='coerce')
+    )
+    # 确保 date_range 有默认值
+    # df['Interval'] = pd.to_datetime(df['Interval'])
     df = df.dropna(subset=['Ad Type'])
     # 根据选择筛选数据
-    df = df[~df['Status'].isin(['system_paused', 'paused'])]
-    
+    df = df[~df['Status'].isin(['system_paused'])]
+    df = df.fillna(0)
+
     st.subheader("排名比较")
     col1, col2, col3 = st.columns(3)
 
