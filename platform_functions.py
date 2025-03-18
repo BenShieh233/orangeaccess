@@ -252,7 +252,7 @@ def display_visual_summary(df: pd.DataFrame, selected_campaign_id: str, selected
         "Value": [total_values[param] for param in selected_params],
         "Rank": [ranks[param] for param in selected_params]
     })
-
+    selected_campaign_name = df.loc[df['Campaign ID'] == selected_campaign_id, 'Campaign Name'].unique()
     # 生成条形图
     fig = px.bar(
         data, 
@@ -260,7 +260,7 @@ def display_visual_summary(df: pd.DataFrame, selected_campaign_id: str, selected
         y="Parameter", 
         text=data["Rank"].apply(lambda r: f"🏆 排名 {r}"), 
         orientation="h", 
-        title=f"📊 {selected_campaign_id} 所有指标数据及其排名",
+        title=f"📊 {selected_campaign_id}-{selected_campaign_name} 所有指标数据及其排名",
         color="Value",
         color_continuous_scale="Blues"
     )
